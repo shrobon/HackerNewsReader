@@ -1,9 +1,15 @@
 package com.shrobon.hackernewsreader;
 
+import android.content.Intent;
+import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteStatement;
 import android.os.AsyncTask;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.View;
+import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.ListView;
 
@@ -20,7 +26,10 @@ import java.util.ArrayList;
 public class MainActivity extends AppCompatActivity {
 
     ArrayList<String> titles = new ArrayList<>();
+    ArrayList<String> content = new ArrayList<>();
     ArrayAdapter arrayAdapter;
+    SQLiteDatabase articlesDB;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -30,12 +39,50 @@ public class MainActivity extends AppCompatActivity {
         arrayAdapter = new ArrayAdapter(this,android.R.layout.simple_list_item_1,titles);
         listView.setAdapter(arrayAdapter);
 
+        listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                Intent intent = new Intent(getApplicationContext(),ArticleActivity.class);
+                intent.putExtra("content", content.get(position));
+                startActivity(intent);
+
+            }
+        });
+
+        articlesDB = this.openOrCreateDatabase("Articles",MODE_PRIVATE,null);
+        articlesDB.execSQL("CREATE TABLE IF NOT EXISTS Articles(id INTEGER PRIMARY KEY, articleId INTEGER, title VARCHAR, content VARCHAR)");
+        updateListView();
+
         DownloadTask task = new DownloadTask();
 
         task.execute("https://hacker-news.firebaseio.com/v0/topstories.json?print=pretty");
 
 
     }
+
+
+    public void updateListView(){
+        Cursor c = articlesDB.rawQuery("SELECT * FROM Articles",null);
+        int contentIndex  = c.getColumnIndex("content");
+        int titleIndex = c.getColumnIndex("title");
+
+        if(c.moveToFirst())
+        {
+            titles.clear();
+            content.clear();
+            do{
+                titles.add(c.getString(titleIndex));
+                content.add(c.getString(contentIndex));
+
+            }while(c.moveToNext());
+
+            arrayAdapter.notifyDataSetChanged();
+        }
+    }
+
+
+
+
 
     public class DownloadTask extends AsyncTask<String,Void,String>
     {
@@ -60,7 +107,7 @@ public class MainActivity extends AppCompatActivity {
                     data = reader.read();
                 }
 
-                Log.i("ÜRLContent",result);
+                //Log.i("ÜRLContent",result);
 
                 //creating a parsable JSONArray
                 JSONArray jsonArray = new JSONArray(result);
@@ -70,6 +117,8 @@ public class MainActivity extends AppCompatActivity {
                 {
                     numberOfItems = jsonArray.length();
                 }
+
+                articlesDB.execSQL("DELETE FROM Articles");
 
                 for(int i = 0; i < numberOfItems; i++)
                 {
@@ -94,7 +143,31 @@ public class MainActivity extends AppCompatActivity {
                     if(!jsonObject.isNull("title") && !jsonObject.isNull("url")){
                         String articleTitle = jsonObject.getString("title");
                         String articleURL = jsonObject.getString("url");
-                        Log.i("Info",articleTitle + articleURL);
+
+                        url = new URL(articleURL);
+                        urlConnection = (HttpURLConnection)url.openConnection();
+
+                        in = urlConnection.getInputStream();
+                        reader = new InputStreamReader(in);
+                        data = reader.read();
+
+                        String articleContent = "";
+                        while( data != -1)
+                        {
+                            char current =(char)data;
+                            articleContent += current;
+                            data = reader.read();
+                        }
+
+                        Log.i("Article Content",articleContent);
+                        String sql = "INSERT INTO Articles (articleId, title, content) VALUES( ?,?,?)";
+
+                        SQLiteStatement statement = articlesDB.compileStatement(sql);
+                        statement.bindString(1,articleId);
+                        statement.bindString(2,articleTitle);
+                        statement.bindString(3,articleContent);
+
+                        statement.execute();
                     }
 
 
@@ -105,6 +178,12 @@ public class MainActivity extends AppCompatActivity {
                 e.printStackTrace();
             }
             return null;
+        }
+
+        @Override
+        protected void onPostExecute(String s) {
+            super.onPostExecute(s);
+            updateListView();
         }
     }
 }
